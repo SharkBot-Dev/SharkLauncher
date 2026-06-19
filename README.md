@@ -1,0 +1,2 @@
+# SharkLauncher
+SharkBot系列のサービスを使用するためのランチャー
