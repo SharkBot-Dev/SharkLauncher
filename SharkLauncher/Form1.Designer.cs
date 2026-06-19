@@ -36,8 +36,12 @@
             avatarImage = new PictureBox();
             loginButton = new Button();
             main = new Panel();
+            funBox = new GroupBox();
+            openOmikuji = new Button();
             sidebar.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)avatarImage).BeginInit();
+            main.SuspendLayout();
+            funBox.SuspendLayout();
             SuspendLayout();
             // 
             // sidebar
@@ -85,9 +89,11 @@
             // 
             // avatarImage
             // 
+            avatarImage.InitialImage = null;
             avatarImage.Location = new Point(0, 400);
             avatarImage.Name = "avatarImage";
             avatarImage.Size = new Size(50, 50);
+            avatarImage.SizeMode = PictureBoxSizeMode.Zoom;
             avatarImage.TabIndex = 1;
             avatarImage.TabStop = false;
             // 
@@ -105,11 +111,32 @@
             // main
             // 
             main.BackColor = SystemColors.GradientActiveCaption;
+            main.Controls.Add(funBox);
             main.Dock = DockStyle.Fill;
             main.Location = new Point(200, 0);
             main.Name = "main";
             main.Size = new Size(600, 450);
             main.TabIndex = 1;
+            // 
+            // funBox
+            // 
+            funBox.Controls.Add(openOmikuji);
+            funBox.Location = new Point(6, 12);
+            funBox.Name = "funBox";
+            funBox.Size = new Size(200, 100);
+            funBox.TabIndex = 0;
+            funBox.TabStop = false;
+            funBox.Text = "お楽しみ・ゲーム";
+            // 
+            // openOmikuji
+            // 
+            openOmikuji.Location = new Point(6, 22);
+            openOmikuji.Name = "openOmikuji";
+            openOmikuji.Size = new Size(83, 23);
+            openOmikuji.TabIndex = 0;
+            openOmikuji.Text = "おみくじを引く";
+            openOmikuji.UseVisualStyleBackColor = true;
+            openOmikuji.Click += openOmikuji_Click;
             // 
             // Form1
             // 
@@ -125,6 +152,8 @@
             sidebar.ResumeLayout(false);
             sidebar.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)avatarImage).EndInit();
+            main.ResumeLayout(false);
+            funBox.ResumeLayout(false);
             ResumeLayout(false);
         }
 
@@ -137,5 +166,7 @@
         private PictureBox avatarImage;
         private Label userId;
         private Button inviteSharkBot;
+        private GroupBox funBox;
+        private Button openOmikuji;
     }
 }

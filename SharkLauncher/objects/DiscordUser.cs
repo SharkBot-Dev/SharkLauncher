@@ -4,6 +4,7 @@
     {
         public string Id { get; set; } = "";
         public string Username { get; set; } = "";
+        public string global_name { get; set; } = "";
         public string? Avatar { get; set; }
 
         public string AvatarUrl =>

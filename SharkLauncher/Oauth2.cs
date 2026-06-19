@@ -1,6 +1,4 @@
 ﻿using SharkLauncher.objects;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
@@ -15,8 +13,37 @@ namespace SharkLauncher
         const string RedirectUri = "http://127.0.0.1:53123/callback/";
         const string Scope = "identify guilds relationships.read";
 
-        public async Task<DiscordLoginResult> LoginUser()
+        private static readonly string AppDataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "SharkBotLauncher"
+        );
+        private static readonly string TokenFilePath = Path.Combine(AppDataDir, "sharkbot_launcher.json");
+
+        public async Task<DiscordLoginResult?> LoginUser()
         {
+            var savedToken = LoadToken();
+
+            if (savedToken != null)
+            {
+                if (DateTime.UtcNow < savedToken.ExpiresAt.AddMinutes(-5))
+                {
+                    try
+                    {
+                        return await FetchDiscordData(savedToken.AccessToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"既存トークンでのデータ取得に失敗（再認証します）: {ex.Message}");
+                        Logout();
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("トークンの期限が切れているため、再ログインが必要です。");
+                    Logout();
+                }
+            }
+
             string verifier = Base64Url(RandomNumberGenerator.GetBytes(64));
             string challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
             string state = Base64Url(RandomNumberGenerator.GetBytes(32));
@@ -65,53 +92,98 @@ namespace SharkLauncher
                 })
             );
 
-            string tokenJson = await tokenRes.Content.ReadAsStringAsync();
-            Console.WriteLine(tokenJson);
+            if (!tokenRes.IsSuccessStatusCode)
+                throw new Exception($"トークンの取得に失敗しました: {tokenRes.StatusCode}");
 
-            var token = JsonDocument.Parse(tokenJson)
-                .RootElement.GetProperty("access_token")
-                .GetString();
+            string tokenJson = await tokenRes.Content.ReadAsStringAsync();
+
+            using var doc = JsonDocument.Parse(tokenJson);
+            var root = doc.RootElement;
+
+            string accessToken = root.GetProperty("access_token").GetString() ?? throw new Exception("access_token not found");
+            int expiresIn = root.GetProperty("expires_in").GetInt32();
+            string? refreshToken = root.TryGetProperty("refresh_token", out var refTokenProp) ? refTokenProp.GetString() : null;
+
+            var tokenInfo = new TokenInfo
+            {
+                AccessToken = accessToken,
+                RefreshToken = refreshToken,
+                ExpiresAt = DateTime.UtcNow.AddSeconds(expiresIn)
+            };
+            SaveToken(tokenInfo);
+
+            return await FetchDiscordData(accessToken);
+        }
+
+        private async Task<DiscordLoginResult> FetchDiscordData(string accessToken)
+        {
+            using var http = new HttpClient();
 
             var req = new HttpRequestMessage(HttpMethod.Get, "https://discord.com/api/users/@me");
-            req.Headers.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-            string userJson = await (await http.SendAsync(req)).Content.ReadAsStringAsync();
+            var userRes = await http.SendAsync(req);
+            if (!userRes.IsSuccessStatusCode)
+                throw new Exception("ユーザー情報の取得に失敗しました（トークンが無効な可能性があります）");
 
-            var user = JsonSerializer.Deserialize<DiscordUser>(
-                userJson,
-                new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                }
-            );
+            string userJson = await userRes.Content.ReadAsStringAsync();
+            var user = JsonSerializer.Deserialize<DiscordUser>(userJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (user == null)
-                throw new Exception("ユーザー情報の取得に失敗しました");
+                throw new Exception("ユーザー情報のデシリアライズに失敗しました");
 
-            var guildReq = new HttpRequestMessage(
-                HttpMethod.Get,
-                "https://discord.com/api/users/@me/guilds?with_counts=true"
-            );
-
-            guildReq.Headers.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            var guildReq = new HttpRequestMessage(HttpMethod.Get, "https://discord.com/api/users/@me/guilds?with_counts=true");
+            guildReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
             string guildJson = await (await http.SendAsync(guildReq)).Content.ReadAsStringAsync();
-
-            var guilds = JsonSerializer.Deserialize<List<DiscordGuild>>(
-                guildJson,
-                new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                }
-            ) ?? new List<DiscordGuild>();
+            var guilds = JsonSerializer.Deserialize<List<DiscordGuild>>(guildJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                         ?? new List<DiscordGuild>();
 
             return new DiscordLoginResult
             {
                 User = user,
                 Guilds = guilds
             };
+        }
+        public void Logout()
+        {
+            if (File.Exists(TokenFilePath))
+            {
+                File.Delete(TokenFilePath);
+            }
+        }
+
+        private void SaveToken(TokenInfo tokenInfo)
+        {
+            try
+            {
+                if (!Directory.Exists(AppDataDir))
+                {
+                    Directory.CreateDirectory(AppDataDir);
+                }
+
+                string json = JsonSerializer.Serialize(tokenInfo, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(TokenFilePath, json, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"トークンの保存に失敗: {ex.Message}");
+            }
+        }
+
+        private TokenInfo? LoadToken()
+        {
+            if (!File.Exists(TokenFilePath)) return null;
+
+            try
+            {
+                string json = File.ReadAllText(TokenFilePath, Encoding.UTF8);
+                return JsonSerializer.Deserialize<TokenInfo>(json);
+            }
+            catch
+            {
+                return null; 
+            }
         }
 
         static string Base64Url(byte[] bytes)
@@ -121,6 +193,13 @@ namespace SharkLauncher
                 .Replace('+', '-')
                 .Replace('/', '_');
         }
+    }
+
+    public class TokenInfo
+    {
+        public string AccessToken { get; set; } = "";
+        public string? RefreshToken { get; set; }
+        public DateTime ExpiresAt { get; set; }
     }
 
     public class DiscordLoginResult
